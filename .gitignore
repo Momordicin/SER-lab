@@ -6,6 +6,10 @@ raw_wavs
 raw_wavs/
 dataset_split
 dataset_split/
+dataset_split_loso
+dataset_split_loso/
+dataset_split_loso_4cls
+dataset_split_loso_4cls/
 ser_ckpt
 ser_ckpt/
 ser_wavlm_ckpt
@@ -22,5 +26,12 @@ cross_dataset_preds.csv
 
 .vscode/
 venv/
+__pycache__/
 
 .DS_Store
+
+tmp*.py
+lascl_ckpt_smoke
+lascl_ckpt_smoke/
+lascl_ckpt_smoke_cli
+lascl_ckpt_smoke_cli/
