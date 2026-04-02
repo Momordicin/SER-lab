@@ -1,5 +1,7 @@
 IEMOCAP_full_release
 IEMOCAP_full_release/
+ravdess_audio
+ravdess_audio/
 raw_wavs
 raw_wavs/
 dataset_split
@@ -10,8 +12,13 @@ ser_wavlm_ckpt
 ser_wavlm_ckpt/
 models
 models/
+embed_vis
+embed_vis/
 predictions.csv
 report.txt
+wavlm_preds.csv
+wavlm_report.txt
+cross_dataset_preds.csv
 
 .vscode/
 venv/

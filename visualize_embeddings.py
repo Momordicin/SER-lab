@@ -28,7 +28,7 @@ try:
 except ImportError:
     HAS_UMAP = False
 
-from transformers import AutoProcessor, WavLMForSequenceClassification
+from transformers import AutoProcessor, AutoFeatureExtractor, WavLMForSequenceClassification
 
 
 # ── helpers (minimal, no dependency on ser_wavlm.py) ──────────────────────────
@@ -91,7 +91,7 @@ def extract_embeddings(data_root, ckpt_dir, split="test",
 
     print(f"Found {len(items)} files in '{split}' split.")
 
-    processor = AutoProcessor.from_pretrained(ckpt_dir)
+    processor = AutoFeatureExtractor.from_pretrained(ckpt_dir)
     model     = WavLMForSequenceClassification.from_pretrained(ckpt_dir)
     device    = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device).eval()

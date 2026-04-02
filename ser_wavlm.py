@@ -16,6 +16,7 @@ except Exception:
 import transformers
 from transformers import (
     AutoProcessor,
+    AutoFeatureExtractor,
     # ↓↓↓ CHANGE 1: replace with WavLM corresponding classification head
     WavLMForSequenceClassification,
     TrainingArguments,
@@ -168,7 +169,7 @@ class SERDataset(torch.utils.data.Dataset):
 
 @dataclass
 class DataCollatorWav2Vec2:
-    processor: AutoProcessor
+    processor: AutoFeatureExtractor
     sampling_rate: int = 16000
     def __call__(self, features):
         input_values = [f["input_values"] for f in features]
@@ -312,7 +313,7 @@ def train_ser(
     id2label = {i: lab for lab, i in label2id.items()}
     print("Labels:", labels)
 
-    processor = AutoProcessor.from_pretrained(model_name)
+    processor = AutoFeatureExtractor.from_pretrained(model_name)
     train_items = load_split_items(train_dir, label2id)
     val_items   = load_split_items(val_dir, label2id)
     class_weights = compute_class_weights(train_items, len(labels)) if use_class_weights else None
@@ -361,7 +362,7 @@ def evaluate_on_test(
     label2id = {lab: i for i, lab in enumerate(labels)}
     id2label = {i: lab for lab, i in label2id.items()}
 
-    processor = AutoProcessor.from_pretrained(ckpt_dir)
+    processor = AutoFeatureExtractor.from_pretrained(ckpt_dir)
     model = WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()  # ← WavLM
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
@@ -409,7 +410,7 @@ def evaluate_on_test(
 
 
 def predict_wav(wav_path, ckpt_dir, sr_target=16000):
-    processor = AutoProcessor.from_pretrained(ckpt_dir)
+    processor = AutoFeatureExtractor.from_pretrained(ckpt_dir)
     model = WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()  # ← WavLM
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
