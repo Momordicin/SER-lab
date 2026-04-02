@@ -165,6 +165,7 @@ def split_dataset_loso(
     test_session: str,
     val_session: str,
     make_metadata_csv: bool = True,
+    keep_labels: Optional[List[str]] = None,
 ):
     """
     Leave-one-session-out style split for IEMOCAP flat wav folder.
@@ -183,6 +184,9 @@ def split_dataset_loso(
     test_session = test_session.lower()
     val_session = val_session.lower()
 
+    if keep_labels is not None:
+        keep_labels = {x.lower() for x in keep_labels}
+
     if test_session == val_session:
         raise ValueError("test_session and val_session must be different.")
 
@@ -198,9 +202,12 @@ def split_dataset_loso(
     for p in sorted(wavs):
         try:
             sess = extract_session_from_name(p)
-            _ = extract_label_from_name(p)  # also validate label format
+            lab = extract_label_from_name(p)
         except Exception:
             skipped += 1
+            continue
+
+        if keep_labels is not None and lab.lower() not in keep_labels:
             continue
 
         if sess == test_session:
@@ -598,6 +605,12 @@ def main():
     p_loso.add_argument("--val_session", required=True, help="e.g. ses04")
     p_loso.add_argument("--test_session", required=True, help="e.g. ses05")
     p_loso.add_argument("--no_csv", action="store_true")
+    p_loso.add_argument(
+        "--keep_labels",
+        nargs="+",
+        default=None,
+        help="Optional subset of labels to keep, e.g. angry happy neutral sad",
+    )
 
     p_tr = sub.add_parser("train")
     p_tr.add_argument("--data_root",   default="./dataset_split")
@@ -648,6 +661,7 @@ def main():
             val_session=args.val_session,
             test_session=args.test_session,
             make_metadata_csv=(not args.no_csv),
+            keep_labels=args.keep_labels,
         )
         return
     if args.cmd == "train":

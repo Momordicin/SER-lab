@@ -8,6 +8,8 @@ dataset_split
 dataset_split/
 dataset_split_loso
 dataset_split_loso/
+dataset_split_loso_4cls
+dataset_split_loso_4cls/
 ser_ckpt
 ser_ckpt/
 ser_wavlm_ckpt
@@ -27,3 +29,5 @@ venv/
 __pycache__/
 
 .DS_Store
+
+*tmp_test*.py
