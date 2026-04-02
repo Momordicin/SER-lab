@@ -33,3 +33,5 @@ __pycache__/
 tmp*.py
 lascl_ckpt_smoke
 lascl_ckpt_smoke/
+lascl_ckpt_smoke_cli
+lascl_ckpt_smoke_cli/
