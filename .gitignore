@@ -6,6 +6,8 @@ raw_wavs
 raw_wavs/
 dataset_split
 dataset_split/
+dataset_split_loso
+dataset_split_loso/
 ser_ckpt
 ser_ckpt/
 ser_wavlm_ckpt
@@ -22,5 +24,6 @@ cross_dataset_preds.csv
 
 .vscode/
 venv/
+__pycache__/
 
 .DS_Store
