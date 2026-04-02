@@ -30,4 +30,6 @@ __pycache__/
 
 .DS_Store
 
-*tmp_test*.py
+tmp*.py
+lascl_ckpt_smoke
+lascl_ckpt_smoke/
