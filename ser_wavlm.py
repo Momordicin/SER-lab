@@ -398,6 +398,7 @@ def make_training_args(out_dir, batch_size=8, epochs=10, lr=3e-5,
         per_device_eval_batch_size=batch_size,
         num_train_epochs=epochs,
         learning_rate=lr,
+        max_grad_norm=1.0, # clip gradients to prevent occasional exploding grad_norm spikes (esp. critical for WavLM)
         weight_decay=weight_decay,
         logging_steps=logging_steps,
         fp16=torch.cuda.is_available(),
@@ -441,13 +442,21 @@ def train_ser(
     out_dir="./ser_wavlm_ckpt",
     seed=42, sr_target=16000, max_seconds=6.0,
     batch_size=8, epochs=10, lr=3e-5, weight_decay=0.01,
-    num_workers=0, use_class_weights=True,
+    num_workers=0, use_class_weights=True,allowed_labels=None,
 ):
     set_seed(seed)
     train_dir = os.path.join(data_root, "train")
     val_dir   = os.path.join(data_root, "val")
 
     labels = get_label_names_from_train(train_dir)
+    
+    # add option to only train on a subset of labels (e.g. just 4 emotions instead of all 6)
+    if allowed_labels:
+        allowed_names = {EMO_TAGS[t] for t in allowed_labels if t in EMO_TAGS}
+        labels = [l for l in labels if l in allowed_names]
+        if not labels:
+            raise ValueError(f"No labels matched after filtering. allowed_labels={allowed_labels}")
+        print(f"[Label filter] Using labels: {labels}")
     label2id = {lab: i for i, lab in enumerate(labels)}
     id2label = {i: lab for lab, i in label2id.items()}
     print("Labels:", labels)
@@ -497,12 +506,14 @@ def evaluate_on_test(
 ):
     train_dir = os.path.join(data_root, "train")
     test_dir  = os.path.join(data_root, "test")
-    labels = get_label_names_from_train(train_dir)
-    label2id = {lab: i for i, lab in enumerate(labels)}
-    id2label = {i: lab for lab, i in label2id.items()}
+    
+    processor = AutoProcessor.from_pretrained(ckpt_dir)
+    model = WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()
 
-    processor = AutoFeatureExtractor.from_pretrained(ckpt_dir)
-    model = WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()  # ← WavLM
+    # Keep a consistent class order based on the train split subfolders
+    id2label  = {int(k): v for k, v in model.config.id2label.items()}
+    label2id  = {v: k for k, v in id2label.items()}
+ 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
@@ -625,6 +636,10 @@ def main():
     p_tr.add_argument("--weight_decay",type=float, default=0.01)
     p_tr.add_argument("--num_workers", type=int,   default=0)
     p_tr.add_argument("--no_class_weights", action="store_true")
+    p_tr.add_argument("--labels", nargs="+", default=None, 
+                      choices=["ANG", "DIS", "FEA", "HAP", "NEU", "SAD"],
+                      help="Only train on these labels. Default: all labels."
+)
 
     p_te = sub.add_parser("test")
     p_te.add_argument("--data_root",   default="./dataset_split")
@@ -668,7 +683,8 @@ def main():
         train_ser(args.data_root, args.model_name, args.out_dir, args.seed,
                   args.sr_target, args.max_seconds, args.batch_size, args.epochs,
                   args.lr, args.weight_decay, args.num_workers,
-                  use_class_weights=(not args.no_class_weights)); return
+                  use_class_weights=(not args.no_class_weights),
+                  allowed_labels=args.labels); return
     if args.cmd == "test":
         evaluate_on_test(args.data_root, args.ckpt_dir, args.sr_target,
                          args.max_seconds, args.batch_size,

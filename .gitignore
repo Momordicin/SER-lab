@@ -13,6 +13,7 @@ dataset_split_loso_4cls
 dataset_split_loso_4cls/
 ser_ckpt
 ser_ckpt/
+_ser_ckpt/
 ser_wavlm_ckpt
 ser_wavlm_ckpt/
 ser_wavlm_ckpt_loso_smoke
