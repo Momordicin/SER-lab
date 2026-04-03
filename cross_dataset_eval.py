@@ -24,7 +24,7 @@ import torch
 import soundfile as sf
 import torchaudio
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
-from transformers import AutoProcessor, WavLMForSequenceClassification
+from transformers import AutoProcessor, AutoFeatureExtractor, WavLMForSequenceClassification
 
 try:
     import pandas as pd
@@ -79,7 +79,7 @@ def evaluate(ravdess_dir, ckpt_dir, out_csv, batch_size=16, sr=16000, max_second
     print(f"Found {len(items)} files with mapped labels.")
 
     # ── load checkpoint
-    processor = AutoProcessor.from_pretrained(ckpt_dir)
+    processor = AutoFeatureExtractor.from_pretrained(ckpt_dir)
     model     = WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()
     device    = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
