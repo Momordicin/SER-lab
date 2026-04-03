@@ -23,8 +23,10 @@ import numpy as np
 import torch
 import soundfile as sf
 import torchaudio
+import json
 from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
-from transformers import AutoProcessor, AutoFeatureExtractor, WavLMForSequenceClassification
+from transformers import AutoModelForSequenceClassification, AutoProcessor, AutoFeatureExtractor, WavLMForSequenceClassification
+from transformers import Wav2Vec2ForSequenceClassification, WavLMForSequenceClassification
 
 try:
     import pandas as pd
@@ -38,11 +40,21 @@ RAVDESS_MAP = {
     "03": "happy",
     "04": "sad",
     "05": "angry",
-    "06": "fear",   # RAVDESS "fearful" → our "fear"
+    # "06": "fear",   # RAVDESS "fearful" → IEMOCAP "fear"
     # "02": "calm",      # no IEMOCAP equivalent, skipped
     # "07": "disgust",   # present in IEMOCAP but usually skipped
     # "08": "surprised", # no IEMOCAP equivalent, skipped
 }
+
+def load_model(ckpt_dir):
+    config_path = os.path.join(ckpt_dir, "config.json")
+    with open(config_path) as f:
+        model_type = json.load(f).get("model_type", "")
+    if model_type == "wavlm":
+        return WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()
+    else:
+        return Wav2Vec2ForSequenceClassification.from_pretrained(ckpt_dir).eval()
+
 
 def parse_ravdess(path):
     """Return label string or None if emotion not in RAVDESS_MAP."""
@@ -80,13 +92,13 @@ def evaluate(ravdess_dir, ckpt_dir, out_csv, batch_size=16, sr=16000, max_second
 
     # ── load checkpoint
     processor = AutoFeatureExtractor.from_pretrained(ckpt_dir)
-    model     = WavLMForSequenceClassification.from_pretrained(ckpt_dir).eval()
-    device    = "cuda" if torch.cuda.is_available() else "cpu"
+    model = load_model(ckpt_dir)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
     # ── build label mapping from checkpoint config
-    id2label  = model.config.id2label
-    label2id  = {v: k for k, v in id2label.items()}
+    id2label = {int(k): v for k, v in model.config.id2label.items()}
+    label2id = {v: int(k) for k, v in id2label.items()}
 
     # filter to classes the checkpoint knows
     valid_items = [(p, lab) for p, lab in items if lab in label2id]
