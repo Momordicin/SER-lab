@@ -1,3 +1,4 @@
+CASIA/
 IEMOCAP_full_release
 IEMOCAP_full_release/
 ravdess_audio
@@ -29,6 +30,9 @@ cross_dataset_preds.csv
 .vscode/
 venv/
 __pycache__/
+_ipynb/
+.git/
+results/
 
 .DS_Store
 
