@@ -33,6 +33,26 @@ print("TrainingArguments comes from:", inspect.getfile(TrainingArguments))
 
 EMO_TAGS = {"ANG": "angry", "DIS": "disgust", "FEA": "fear", "HAP": "happy", "NEU": "neutral", "SAD": "sad"}
 EMO_RE = re.compile(r"_(ANG|DIS|FEA|HAP|NEU|SAD)(?:_|$)")
+SESSION_RE = re.compile(r"(Ses\d{2})", re.IGNORECASE)
+
+def extract_session_from_name(path: str) -> str:
+    stem = os.path.splitext(os.path.basename(path.strip()))[0]
+    m = SESSION_RE.search(stem)
+    if not m:
+        raise ValueError(f"Could not find session tag in filename: {os.path.basename(path)}")
+    return m.group(1).lower()   # e.g. ses01
+
+def extract_dialog_from_name(path: str) -> str:
+    """
+    Example:
+      Ses01F_impro01_F000_NEU.wav -> ses01f_impro01
+      Ses02M_script03_1_FEA.wav   -> ses02m_script03
+    """
+    stem = os.path.splitext(os.path.basename(path.strip()))[0]
+    parts = stem.split("_")
+    if len(parts) < 2:
+        raise ValueError(f"Could not find dialog name in filename: {os.path.basename(path)}")
+    return "_".join(parts[:2]).lower()
 
 def is_real_wav(name: str) -> bool:
     base = os.path.basename(name)
@@ -139,6 +159,125 @@ def split_dataset(
             df.to_csv(csv_path, index=False); print(f"Wrote {csv_path}")
         dump_csv("train", train_files); dump_csv("val", val_files); dump_csv("test", test_files)
 
+def split_dataset_loso(
+    source_dir: str,
+    target_dir: str,
+    test_session: str,
+    val_session: str,
+    make_metadata_csv: bool = True,
+    keep_labels: Optional[List[str]] = None,
+):
+    """
+    Leave-one-session-out style split for IEMOCAP flat wav folder.
+
+    Example:
+      test_session = 'ses05'
+      val_session  = 'ses04'
+      train        = all remaining sessions
+    """
+    os.makedirs(target_dir, exist_ok=True)
+
+    wavs = list_wavs_flat(source_dir)
+    if not wavs:
+        raise RuntimeError(f"No .wav files found in: {source_dir}")
+
+    test_session = test_session.lower()
+    val_session = val_session.lower()
+
+    if keep_labels is not None:
+        keep_labels = {x.lower() for x in keep_labels}
+
+    if test_session == val_session:
+        raise ValueError("test_session and val_session must be different.")
+
+    valid_sessions = {"ses01", "ses02", "ses03", "ses04", "ses05"}
+    if test_session not in valid_sessions:
+        raise ValueError(f"Invalid test_session: {test_session}")
+    if val_session not in valid_sessions:
+        raise ValueError(f"Invalid val_session: {val_session}")
+
+    train_files, val_files, test_files = [], [], []
+    skipped = 0
+
+    for p in sorted(wavs):
+        try:
+            sess = extract_session_from_name(p)
+            lab = extract_label_from_name(p)
+        except Exception:
+            skipped += 1
+            continue
+
+        if keep_labels is not None and lab.lower() not in keep_labels:
+            continue
+
+        if sess == test_session:
+            test_files.append(p)
+        elif sess == val_session:
+            val_files.append(p)
+        else:
+            train_files.append(p)
+
+    if skipped:
+        print(f"Note: {skipped} files skipped (could not parse session or label).")
+
+    if not train_files or not val_files or not test_files:
+        raise RuntimeError(
+            f"Empty split detected: train={len(train_files)}, "
+            f"val={len(val_files)}, test={len(test_files)}"
+        )
+
+    def copy_into(split_name: str, paths: List[str]):
+        for p in paths:
+            lab = extract_label_from_name(p)
+            out_dir = os.path.join(target_dir, split_name, lab)
+            os.makedirs(out_dir, exist_ok=True)
+            shutil.copy2(p, os.path.join(out_dir, os.path.basename(p)))
+
+    copy_into("train", train_files)
+    copy_into("val", val_files)
+    copy_into("test", test_files)
+
+    print("\nLOSO split complete")
+    print(f"  train: {len(train_files)}")
+    print(f"  val  : {len(val_files)}")
+    print(f"  test : {len(test_files)}")
+    print(f"  val_session : {val_session}")
+    print(f"  test_session: {test_session}")
+    print(f"Finished. Split dataset at: {target_dir}")
+
+    def summarize(paths: List[str], split_name: str):
+        counter = collections.Counter()
+        sessions = collections.Counter()
+        for p in paths:
+            counter[extract_label_from_name(p)] += 1
+            sessions[extract_session_from_name(p)] += 1
+        print(f"\n{split_name.upper()} label counts:")
+        for lab in sorted(counter):
+            print(f"  {lab:10s} {counter[lab]}")
+        print(f"{split_name.upper()} session counts:")
+        for sess in sorted(sessions):
+            print(f"  {sess:10s} {sessions[sess]}")
+
+    summarize(train_files, "train")
+    summarize(val_files, "val")
+    summarize(test_files, "test")
+
+    if make_metadata_csv and pd is not None:
+        def dump_csv(name: str, paths: List[str]):
+            df = pd.DataFrame({
+                "path": paths,
+                "filename": [os.path.basename(p) for p in paths],
+                "label": [extract_label_from_name(p) for p in paths],
+                "session": [extract_session_from_name(p) for p in paths],
+                "dialog": [extract_dialog_from_name(p) for p in paths],
+            })
+            csv_path = os.path.join(target_dir, f"{name}_metadata.csv")
+            df.to_csv(csv_path, index=False)
+            print(f"Wrote {csv_path}")
+
+        dump_csv("train", train_files)
+        dump_csv("val", val_files)
+        dump_csv("test", test_files)
 
 class SERDataset(torch.utils.data.Dataset):
     def __init__(self, items, processor, target_sr=16000, max_seconds=6.0, min_seconds=0.2, trim_or_pad=True):
@@ -460,6 +599,19 @@ def main():
     p_sp.add_argument("--seed", type=int, default=42)
     p_sp.add_argument("--no_csv", action="store_true")
 
+    p_loso = sub.add_parser("split_loso", help="Leave-one-session-out split for IEMOCAP flat wavs")
+    p_loso.add_argument("--source_dir", required=True)
+    p_loso.add_argument("--target_dir", default="./dataset_split_loso")
+    p_loso.add_argument("--val_session", required=True, help="e.g. ses04")
+    p_loso.add_argument("--test_session", required=True, help="e.g. ses05")
+    p_loso.add_argument("--no_csv", action="store_true")
+    p_loso.add_argument(
+        "--keep_labels",
+        nargs="+",
+        default=None,
+        help="Optional subset of labels to keep, e.g. angry happy neutral sad",
+    )
+
     p_tr = sub.add_parser("train")
     p_tr.add_argument("--data_root",   default="./dataset_split")
     p_tr.add_argument("--model_name",  default="microsoft/wavlm-base-plus")  # new default model
@@ -502,6 +654,16 @@ def main():
         split_dataset(args.source_dir, args.target_dir, args.train_ratio,
                       args.val_ratio, args.test_ratio, args.seed,
                       make_metadata_csv=(not args.no_csv)); return
+    if args.cmd == "split_loso":
+        split_dataset_loso(
+            source_dir=args.source_dir,
+            target_dir=args.target_dir,
+            val_session=args.val_session,
+            test_session=args.test_session,
+            make_metadata_csv=(not args.no_csv),
+            keep_labels=args.keep_labels,
+        )
+        return
     if args.cmd == "train":
         train_ser(args.data_root, args.model_name, args.out_dir, args.seed,
                   args.sr_target, args.max_seconds, args.batch_size, args.epochs,
