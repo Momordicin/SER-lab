@@ -23,6 +23,7 @@ def main():
     p_train.add_argument("--temperature", type=float, default=0.07)
     p_train.add_argument("--lambda_ce", type=float, default=0.5)
     p_train.add_argument("--lambda_scl", type=float, default=0.5)
+    p_train.add_argument("--lambda_label_div", type=float, default=0.0)
     p_train.add_argument("--seed", type=int, default=42)
     p_train.add_argument("--max_train_items", type=int, default=None)
     p_train.add_argument("--max_val_items", type=int, default=None)
@@ -52,6 +53,7 @@ def main():
         cfg.temperature = args.temperature
         cfg.lambda_ce = args.lambda_ce
         cfg.lambda_scl = args.lambda_scl
+        cfg.lambda_label_div = args.lambda_label_div
         cfg.seed = args.seed
         cfg.label_texts = ["angry", "happy", "neutral", "sad"]
 
