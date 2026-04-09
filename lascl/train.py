@@ -8,6 +8,8 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoFeatureExtractor
 
+from sklearn.metrics import f1_score
+
 from .config import LaSCLConfig
 from .dataset import (
     get_label_names_from_train,
@@ -49,6 +51,7 @@ def evaluate(model, criterion, dataloader, device):
     total_loss = 0.0
     total_ce = 0.0
     total_scl = 0.0
+    total_label_div = 0.0
     total_items = 0
 
     y_true = []
@@ -72,24 +75,28 @@ def evaluate(model, criterion, dataloader, device):
         total_loss += loss_dict["loss"].item() * bs
         total_ce += loss_dict["ce_loss"].item() * bs
         total_scl += loss_dict["scl_loss"].item() * bs
+        total_label_div += loss_dict["label_div_loss"].item() * bs
         total_items += bs
 
         preds = torch.argmax(outputs["logits"], dim=-1)
         y_true.append(labels.cpu())
         y_pred.append(preds.cpu())
 
-    y_true = torch.cat(y_true)
-    y_pred = torch.cat(y_pred)
+    y_true = torch.cat(y_true).numpy()
+    y_pred = torch.cat(y_pred).numpy()
 
-    acc = (y_true == y_pred).float().mean().item()
+    acc = (y_true == y_pred).mean().item()
+    f1_macro = f1_score(y_true, y_pred, average="macro")
+    f1_weighted = f1_score(y_true, y_pred, average="weighted")
 
-    # macro F1 without sklearn dependency here would be annoying,
-    # so keep val metric simple for now
     return {
         "loss": total_loss / max(total_items, 1),
         "ce_loss": total_ce / max(total_items, 1),
         "scl_loss": total_scl / max(total_items, 1),
+        "label_div_loss": total_label_div / max(total_items, 1),
         "accuracy": acc,
+        "f1_macro": f1_macro,
+        "f1_weighted": f1_weighted,
     }
 
 
@@ -232,6 +239,7 @@ def train_lascl(
         temperature=cfg.temperature,
         lambda_ce=cfg.lambda_ce,
         lambda_scl=cfg.lambda_scl,
+        lambda_label_div=cfg.lambda_label_div,
         class_weights=class_weights.to(device) if class_weights is not None else None,
     )
 
@@ -255,7 +263,7 @@ def train_lascl(
         weight_decay=cfg.weight_decay,
     )
 
-    best_val_loss = float("inf")
+    best_val_f1 = float("-inf")
     best_path = os.path.join(out_dir, "best_model.pt")
 
     history = []
@@ -266,6 +274,7 @@ def train_lascl(
         running_loss = 0.0
         running_ce = 0.0
         running_scl = 0.0
+        running_label_div = 0.0
         seen = 0
 
         for step, batch in enumerate(train_loader, start=1):
@@ -291,6 +300,7 @@ def train_lascl(
             running_loss += loss.item() * bs
             running_ce += loss_dict["ce_loss"].item() * bs
             running_scl += loss_dict["scl_loss"].item() * bs
+            running_label_div += loss_dict["label_div_loss"].item() * bs
             seen += bs
 
             if step % 20 == 0:
@@ -298,13 +308,15 @@ def train_lascl(
                     f"Epoch {epoch} Step {step} | "
                     f"loss={running_loss/seen:.4f} "
                     f"ce={running_ce/seen:.4f} "
-                    f"scl={running_scl/seen:.4f}"
+                    f"scl={running_scl/seen:.4f} "
+                    f"label_div={running_label_div/seen:.4f}"
                 )
 
         train_metrics = {
             "loss": running_loss / max(seen, 1),
             "ce_loss": running_ce / max(seen, 1),
             "scl_loss": running_scl / max(seen, 1),
+            "label_div_loss": running_label_div / max(seen, 1),
         }
         val_metrics = evaluate(model, criterion, val_loader, device)
 
@@ -318,9 +330,15 @@ def train_lascl(
         print(f"\nEpoch {epoch} complete")
         print("Train:", train_metrics)
         print("Val  :", val_metrics)
+        print(
+            f"Epoch {epoch} summary | "
+            f"val_loss={val_metrics['loss']:.4f} "
+            f"val_acc={val_metrics['accuracy']:.4f} "
+            f"val_f1_macro={val_metrics['f1_macro']:.4f}"
+        )
 
-        if val_metrics["loss"] < best_val_loss:
-            best_val_loss = val_metrics["loss"]
+        if val_metrics["f1_macro"] > best_val_f1:
+            best_val_f1 = val_metrics["f1_macro"]
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
@@ -331,11 +349,11 @@ def train_lascl(
                 best_path,
             )
             processor.save_pretrained(out_dir)
-            print(f"Saved best model to {best_path}")
+            print(f"Saved best model to {best_path} (best val f1_macro={best_val_f1:.4f})")
 
         with open(os.path.join(out_dir, "history.json"), "w") as f:
             json.dump(history, f, indent=2)
 
     print("\nTraining finished.")
-    print(f"Best val loss: {best_val_loss:.4f}")
+    print(f"Best val f1_macro: {best_val_f1:.4f}")
     print(f"Best checkpoint: {best_path}")

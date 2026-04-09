@@ -48,10 +48,45 @@ def supervised_contrastive_loss(features: torch.Tensor, labels: torch.Tensor, te
     return loss
 
 
+def label_divergence_loss(label_embeddings: torch.Tensor) -> torch.Tensor:
+    """
+    Encourage projected label embeddings to be separated from each other.
+
+    Args:
+        label_embeddings: [K, d], assumed normalized
+
+    Returns:
+        scalar loss
+    """
+    device = label_embeddings.device
+    K = label_embeddings.size(0)
+
+    if K < 2:
+        return torch.tensor(0.0, device=device, dtype=label_embeddings.dtype)
+
+    sim = torch.matmul(label_embeddings, label_embeddings.T)   # [K, K]
+
+    losses = []
+    for i in range(K):
+        others_mask = torch.ones(K, dtype=torch.bool, device=device)
+        others_mask[i] = False
+
+        sims_i = sim[i, others_mask]   # [K-1]
+        denom = torch.exp(sims_i).sum() + 1.0
+        p = torch.exp(sims_i) / denom
+
+        loss_i = -torch.log((1.0 - p).clamp(min=1e-12))
+        losses.append(loss_i.mean())
+
+    return torch.stack(losses).mean()
+
+
 class LaSCLLoss(nn.Module):
     """
-    First runnable LaSCL-lite loss:
-      total = lambda_ce * CE + lambda_scl * SCL
+    LaSCL training loss:
+      total = lambda_ce * CE
+            + lambda_scl * SCL
+            + lambda_label_div * LabelDivergence
 
     SCL is computed over:
       - original audio embeddings
@@ -64,6 +99,7 @@ class LaSCLLoss(nn.Module):
         temperature: float = 0.07,
         lambda_ce: float = 0.5,
         lambda_scl: float = 0.5,
+        lambda_label_div: float = 0.0,
         class_weights: torch.Tensor | None = None,
     ):
         super().__init__()
@@ -71,6 +107,7 @@ class LaSCLLoss(nn.Module):
         self.temperature = temperature
         self.lambda_ce = lambda_ce
         self.lambda_scl = lambda_scl
+        self.lambda_label_div = lambda_label_div
         self.register_buffer("class_weights", class_weights if class_weights is not None else None)
 
     def forward(self, outputs: dict, labels: torch.Tensor):
@@ -100,10 +137,17 @@ class LaSCLLoss(nn.Module):
             temperature=self.temperature,
         )
 
-        total_loss = self.lambda_ce * ce_loss + self.lambda_scl * scl_loss
+        label_div_loss = label_divergence_loss(text_z)
+
+        total_loss = (
+            self.lambda_ce * ce_loss
+            + self.lambda_scl * scl_loss
+            + self.lambda_label_div * label_div_loss
+        )
 
         return {
             "loss": total_loss,
             "ce_loss": ce_loss.detach(),
             "scl_loss": scl_loss.detach(),
+            "label_div_loss": label_div_loss.detach(),
         }
