@@ -353,12 +353,21 @@ def train_ser(
     weight_decay: float = 0.01,
     num_workers: int = 0,
     use_class_weights: bool = True,
+    allowed_labels=None,
 ):
     set_seed(seed)
     train_dir = os.path.join(data_root, "train")
     val_dir   = os.path.join(data_root, "val")
 
     labels = get_label_names_from_train(train_dir)
+
+    # add option to only train on a subset of labels (e.g. just 4 emotions instead of all 6)
+    if allowed_labels:
+        allowed_names = {EMO_TAGS[t] for t in allowed_labels if t in EMO_TAGS}
+        labels = [l for l in labels if l in allowed_names]
+        if not labels:
+            raise ValueError(f"No labels matched after filtering. allowed_labels={allowed_labels}")
+        print(f"[Label filter] Using labels: {labels}")
     label2id = {lab: i for i, lab in enumerate(labels)}
     id2label = {i: lab for lab, i in label2id.items()}
     print("Labels:", labels)
@@ -420,14 +429,15 @@ def evaluate_on_test(
 ):
     train_dir = os.path.join(data_root, "train")
     test_dir  = os.path.join(data_root, "test")
-
-    # Keep a consistent class order based on the train split subfolders
-    labels = get_label_names_from_train(train_dir)         
-    label2id = {lab: i for i, lab in enumerate(labels)}
-    id2label = {i: lab for lab, i in label2id.items()}
-
+    
     processor = AutoProcessor.from_pretrained(ckpt_dir)
     model = Wav2Vec2ForSequenceClassification.from_pretrained(ckpt_dir).eval()
+
+    # Keep a consistent class order based on the train split subfolders
+    id2label  = {int(k): v for k, v in model.config.id2label.items()}
+    label2id  = {v: k for k, v in id2label.items()}
+    
+        
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
@@ -438,7 +448,8 @@ def evaluate_on_test(
     dl = torch.utils.data.DataLoader(test_ds, batch_size=batch_size, shuffle=False,
                                      collate_fn=collator, num_workers=0, pin_memory=False)
 
-    y_true, y_pred = [], []
+    y_true, y_pred, paths = [], [], []
+    all_paths = [p for p, _ in test_ds.items]
     with torch.no_grad():
         for batch in dl:
             labels_t = batch.pop("labels").numpy()
@@ -475,7 +486,7 @@ def evaluate_on_test(
         np.savetxt(preds_csv, np.vstack([y_true, y_pred]).T, fmt="%d", delimiter=",",
                    header="y_true,y_pred", comments="")
     else:
-        pd.DataFrame({"y_true": y_true, "y_pred": y_pred}).to_csv(preds_csv, index=False)
+        pd.DataFrame({"path":all_paths,"y_true": [id2label[i] for i in y_true], "y_pred": [id2label[i] for i in y_pred]}).to_csv(preds_csv, index=False)
     print(f"Saved predictions to {preds_csv}")
 
     if report_txt:
@@ -591,6 +602,10 @@ def main():
     p_tr.add_argument("--weight_decay", type=float, default=0.01)
     p_tr.add_argument("--num_workers", type=int, default=0)
     p_tr.add_argument("--no_class_weights", action="store_true")
+    p_tr.add_argument("--labels", nargs="+", default=None, 
+                      choices=["ANG", "DIS", "FEA", "HAP", "NEU", "SAD"],
+                      help="Only train on these labels. Default: all labels."
+)
 
     p_te = sub.add_parser("test", help="Evaluate on test split")
     p_te.add_argument("--data_root", default="./dataset_split")
@@ -643,6 +658,7 @@ def main():
             weight_decay=args.weight_decay,
             num_workers=args.num_workers,
             use_class_weights=(not args.no_class_weights),
+            allowed_labels=args.labels,
         ); return
 
     if args.cmd == "test":
